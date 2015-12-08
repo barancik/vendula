@@ -57,12 +57,10 @@ class Sentence(object):
     def __init__(self,line):
         self.words = [Word(unit,idx) for idx,unit in enumerate(line.strip().split())]
         self.verbs = filter(lambda x: x.is_verb(), self.words)
-#        verb_idxs = map(lambda x: x.position,self.verbs)
         self.verb_object_pairs = [(w,o) for w in self.verbs for o in self.find_objects(w.position)]
 
     def get_lemma(self,idx):
         return self.words[idx].shortlemma
-
 
     def __str__(self):
         return " ".join([word.word for word in self.words])
@@ -92,7 +90,7 @@ class Sentence(object):
                     # na výsledek uplatnit další pozitivní filtr -3, +3 [tag="N..S1.*"] (př. rozkaz se dal)
                     for y in self.sentence_range(idx-3,x+3):
                         w = self.words[y]
-                        if w.is_noun() and w.is_singular() and w.is_nominative():
+                        if w.is_noun("1","S"): # and w.is_singular() and w.is_nominative():
                             found.append((self.words[x].shortlemma, w.shortlemma))
         return found
 
@@ -108,7 +106,7 @@ class Sentence(object):
                 if self.words[x].is_verb() and self.words[x].is_active():
                     for y in self.sentence_range(s_idx-3,x+3):
                         w = self.words[y]
-                        if w.is_noun() and w.is_singular() and w.is_nominative():
+                        if w.is_noun("1","S"): # and w.is_singular() and w.is_nominative():
                              found.append((self.words[x].shortlemma, w.shortlemma))
         return found
 
@@ -116,33 +114,45 @@ class Sentence(object):
         #positive pattern
         #[lemma="mít"&tag="V.*"] [lemma!="být"&tag!="Vf."]
         found = []
-        mit_idxs = [x.position for x in self.verbs if x.shortlemma == "mít"]
-        mit = [sentence.words[x] for x in mit_idx \
-                                 if sentence.words[x+1].shortlemma != "být" \
-                                 if not sentence.words[x+1].has_tag("Vf.")]
-        for verb in mit:
-            for x in self.sentence_range(s_idx,s_idx+5):
+        #idxs of verbs ="mít", not followed by "být"
+        mit_idxs = filter(lambda x: sentence.words[x+1].shortlemma != "být" \
+                          and not sentence.words[x+1].has_tag("Vf"), \
+                         [x.position for x in self.verbs if x.shortlemma == "mít"])
+#        mit = [self.words[x] for x in mit_idxs \
+#                                 if self.words[x+1].shortlemma != "být" \
+#                                 if not self.words[x+1].has_tag("Vf")]
+        for mit_idx in mit_idxs:
+            for x in self.sentence_range(mit_idx+1,mit_idx+6):
+                if self.words[x].is_verb() and self.words[x].has_tag("Vs"):
+                    for obj in self._find_objects(mit_idx-3,x+3):
+                        found.append((self.words[x].shortlemma,self.words[obj].shortlemma))
+#                    for o in self.sentence_range(mit_idx-3,x+3):
+#                        if self.words[o].is_object() and self.not_follows_preposition(o):
+#                               found.append((self.words[x].shortlemma,self.words[o].shortlemma))
+        return found
         #TODO - tu jsem nekde asi prestala
-        filter(lambda x: x.shortlemma == "mít" and x.is_verb() and /
+        #ilter(lambda x: x.shortlemma == "mít" and x.is_verb() and /
 
-
+    def _find_objects(self,top,bottom,case="4",number="S"):
+        return filter(lambda x: self.words[x].is_noun(case,number) and 
+                               self.not_follows_preposition(x), \
+                      self.sentence_range(top,bottom))
 
     def find_objects(self,idx,context_size=CONTEXT_SIZE):
         # Get verb idx and return array with  its objects.
         bottom = max(0,idx-context_size)
         top = min(idx+context_size+1,len(self.words))
-        return [self.words[x] for x in range(bottom,top) if self.words[x].is_noun() \
-                                                        if self.words[x].is_accusative() \
-                                                        if not self.follows_preposition(x)]
+        return [self.words[x] for x in range(bottom,top) if self.words[x].is_noun(case="4") \
+                                                         if self.not_follows_preposition(x)]
         
-    def follows_preposition(self,idx):
+    def not_follows_preposition(self,idx):
         if idx == 0:
-            return False
-        if self.words[idx-1].is_preposition():
             return True
+        if self.words[idx-1].is_preposition():
+            return False
         if self.words[idx-1].is_adjective():
-            return self.follows_preposition(idx-1)
-        return False
+            return self.not_follows_preposition(idx-1)
+        return True
 
     def print_objects(self):
         print ", ".join(["%s - %s" % (v.shortlemma,o.shortlemma) for v,o in self.verb_object_pairs])
@@ -157,7 +167,7 @@ class Word(object):
         self.lemma = parts[1]
         self.tag = parts[2]
         self.position = position
-        self.shortlemma = self.shortlemma()
+        self.shortlemma = self._shortlemma()
 
     def __str__(self):
         return self.word
@@ -183,8 +193,16 @@ class Word(object):
     def is_nominative(self):
         return self.case() == "1"
 
-    def is_noun(self):
-        return self.tag.startswith("N")
+    def is_object(self,case="4",number="S"):
+        return self.is_noun() and self.case() == case and self.number() == number
+
+    def is_noun(self, case=None, number=None):
+        return_value = self.tag.startswith("N")
+        if case is not None:
+             return_value &= self.case() == case
+        if number is not None:
+            return_value &= self.number() == number
+        return return_value
 
     def is_preposition(self):
         return self.tag.startswith("R")
@@ -199,46 +217,24 @@ class Word(object):
         #whether it is singular or plural
         return self.tag[3]
 
-    def shortlemma(self):
+    def _shortlemma(self):
         if len(self.lemma) < 2 or self.lemma[0] in ["^","_",";","`","-"]:
             return self.lemma
         return re.match("[^_;`-]+",self.lemma).group(0)
-#
-##def print_arount(words,idx,context_size=CONTEXT_SIZE):
-##    a = max(0,idx-CONTEXT_SIZE)
-##    b = min(idx+CONTEXT_SIZE+1,len(words))
-##    print " ".join([get_word(words[i]) for i in range(a,b)])            
-
-#def process_sentence(line):
-    # takes lines from input and creates list of Word objects
-
-    
-
-#def query1(position,words)
-
-#
-#def find_it(words,idx,it=TAG,context_size=CONTEXT_SIZE):
-#    a = max(0,idx-CONTEXT_SIZE)
-#    b = min(idx+CONTEXT_SIZE+1,len(words))
-#    return [shortlemma(words[i]) for i in range(a,b) if has_tag(words[i],TAG)]
-#
-#
-#def verb_nouns(verbs=VERBS):
-#    nouns = set()
-#    for verb in verbs:
-#        verb_no_punct = unidecode.unidecode(verb.decode(utf-8))
-#        for line in open("distinguishing/nouns/"+verb_no_punct,"r"):
-#            nouns.add(
-#
 
 #verbex = re.escape(verb) + r"[:_]?"
 #nsgacc = r"N..S4.*"
 if __name__ == "__main__":
 #    Corpus(sys.argv[1])
-     for line in gzip.open("corps/extracted.gz","r"):
+     i = 0
+     for line in gzip.open("corpora/czeng10","r"):
+         i += 1
+#     for line in gzip.open("corps/extracted.gz","r"):
          sentence = Sentence(line)
-         r =  sentence._query2b()
-         if r:
+
+         rrr =  sentence._query2c()
+         if rrr:
+             print i
              import pdb; pdb.set_trace()
 #         print "---------"
 
