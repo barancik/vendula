@@ -9,48 +9,43 @@ import unidecode
 
 from collections import defaultdict
 
-#tohle nebude uplne fungovat, potreba jeste vyresit cesty
+# zkusit i CONTEXT_SIZE 4, obcas by to zda se pomohlo..y
 CONTEXT_SIZE = 3
 TAG = r"N..S4.*"
 #VERBS = [verb.strip() for verb in open("../FINAL_VERBS","r")]
 
-class Corpus(object):
-    def __init__(self,path_to_corpora):
-        # The verbs I am interested in.
-        self.verbs = [verb.strip() for verb in open("../FINAL_VERBS","r")]
-        # Light Verb frequency
-        self.LV_freq = defaultdict(int)
-        # Noun frequency
-        self.N_freq = defaultdict(int)
-        # Light Verb + Noun frequency
-        self.LV_N_freq = defaultdict(int)
-        # Light Verb + Noun + Pattern Set frequency
-        self.LV_N_PS_freq = defaultdict(int)
-        # Noun + Pattern Set frequency
-        self.N_PS_freq = defaultdict(int)
-        self.sentences = []
-        self.compute(path_to_corpora)
+#class Matches(object):
+#    #one class to contain more Matches
+#    def __init__(self):
+#        self.matches = []
+#
+#    def add(self,match):
+#        self.matches.append(match)
+#
+#    def __str__(self):
+#        fo
+#
+#class Match(object):
+#    #captured matched verbs, object
+#    def __init__(verb,obj,structure):
+#        self.verb = verb
+#        self.obj = obj
+#        self.structure = structure
+#
+#    def __str__(self):
+#        return "%s %s %s" % (self.verb,self.obj,self.structure)
+#
 
-    def compute(self,path):
-        line = list(gzip.open(path,"r"))[1]
-        sentence  = Sentence(line)
- #       for line in gzip.open(path,"r"):
-#            print line
-#            sentence  = Sentence(line)
-#            self.sentences.append(sentence) # N
-#            for vi in sentence.verb_idxs:
-#                verb = sentence.get_lemma(vi)
-#                objects = sentence.find_object(vi)
-#                for noun in objects:
-#                    if verb in self.verbs:
-#                        self.LV_N_freq[(verb,noun)] += 1 # LV + N
-#                        self.LV_freq[verb] += 1 # LV
-#                    self.N_freq[noun] += 1
+class MM(object):
+    def __init__(self):
+        self.counts = defaultdict(int)
 
-    def add_noun_counts(self,sentence):
-        for noun_idx in sentence.noun_idxs:
-            self.N_freq[sentence.get_lemma(noun_idx)] += 1
-            print sentence.get_lemma(noun_idx)
+    def add(self,arr):
+        for arg in arr:
+            self.counts[arg] += 1
+
+    def __str__(self):
+        return "\n".join(["%s %s %s %d" % (x[0],x[1],x[2],y) for x,y in self.counts.iteritems()])
 
 
 class Sentence(object):
@@ -59,24 +54,46 @@ class Sentence(object):
         self.verbs = filter(lambda x: x.is_verb(), self.words)
         self.verb_object_pairs = [(w,o) for w in self.verbs for o in self.find_objects(w.position)]
 
-    def get_lemma(self,idx):
+    def verb_object_estimate(self):
+        return len(self.verb_object_pairs)
+
+    def lemma(self,idx):
         return self.words[idx].shortlemma
 
     def __str__(self):
         return " ".join([word.word for word in self.words])
 
+    def count(self,matches):
+        matches.add(self._query1())
+        matches.add(self._query2a())
+        matches.add(self._query2b())
+        matches.add(self._query2c())
+        matches.add(self._query3())
+        matches.add(self._query4())
+        matches.add(self._query5())
+        return matches
+
+    def print_matches(self):
+        matches = MM()
+        matches.add(self._query1())
+        matches.add(self._query2a())
+        matches.add(self._query2b())
+        matches.add(self._query2c())
+        matches.add(self._query3())
+        matches.add(self._query4())
+        matches.add(self._query5())
+        print self.__str__()
+        if matches.counts:
+            print matches
+        else:
+            print "Nada"
+
     def _query1(self):
         #negative pattern
         # type [lemma="dát"&tag="V[^s].*"] positive filter -3, +3 [tag="N..S4.*"]
         # tj. beru to jako ten muj objekt, ale v singularu
-        active_verbs = filter(lambda x: x.is_active(), self.verbs)
-        query1 = filter(lambda (x,y): x in active_verbs and y.is_singular(), self.verb_object_pairs)
-        return self.return_lemma_pairs(query1)
-
-    def sentence_range(self,bottom,top):
-        bottom = max(0,bottom)
-        top = min(top,len(self.words))
-        return range(bottom,top)
+        query1 = filter(lambda (x,y): x.is_active() and y.is_singular(), self.verb_object_pairs)
+        return [(pair[0].shortlemma, pair[1].shortlemma, "q1")for pair in query1]
 
     def _query2a(self):
         #positive_pattern
@@ -89,9 +106,8 @@ class Sentence(object):
                 if self.words[x].is_verb() and not self.words[x].is_active():
                     # na výsledek uplatnit další pozitivní filtr -3, +3 [tag="N..S1.*"] (př. rozkaz se dal)
                     for y in self.sentence_range(idx-3,x+3):
-                        w = self.words[y]
-                        if w.is_noun("1","S"): # and w.is_singular() and w.is_nominative():
-                            found.append((self.words[x].shortlemma, w.shortlemma))
+                        if self.words[y].is_noun("1","S"): # and w.is_singular() and w.is_nominative():
+                            found.append((self.lemma(x), self.lemma(y),"q2a"))
         return found
 
     def _query2b(self):
@@ -105,9 +121,8 @@ class Sentence(object):
                 # verb [lemma="dát"&tag="V[^s].*"]
                 if self.words[x].is_verb() and self.words[x].is_active():
                     for y in self.sentence_range(s_idx-3,x+3):
-                        w = self.words[y]
-                        if w.is_noun("1","S"): # and w.is_singular() and w.is_nominative():
-                             found.append((self.words[x].shortlemma, w.shortlemma))
+                        if self.words[y].is_noun("1","S"): # and w.is_singular() and w.is_nominative():
+                             found.append((self.lemma(x), self.lemma(y),"q2b"))
         return found
 
     def _query2c(self):
@@ -115,28 +130,53 @@ class Sentence(object):
         #[lemma="mít"&tag="V.*"] [lemma!="být"&tag!="Vf."]
         found = []
         #idxs of verbs ="mít", not followed by "být"
-        mit_idxs = filter(lambda x: sentence.words[x+1].shortlemma != "být" \
-                          and not sentence.words[x+1].has_tag("Vf"), \
+        mit_idxs = filter(lambda x: self.words[x+1].shortlemma != "být" \
+                          and not self.words[x+1].has_tag("Vf"), \
                          [x.position for x in self.verbs if x.shortlemma == "mít"])
-#        mit = [self.words[x] for x in mit_idxs \
-#                                 if self.words[x+1].shortlemma != "být" \
-#                                 if not self.words[x+1].has_tag("Vf")]
+        
         for mit_idx in mit_idxs:
             for x in self.sentence_range(mit_idx+1,mit_idx+6):
                 if self.words[x].is_verb() and self.words[x].has_tag("Vs"):
                     for obj in self._find_objects(mit_idx-3,x+3):
-                        found.append((self.words[x].shortlemma,self.words[obj].shortlemma))
-#                    for o in self.sentence_range(mit_idx-3,x+3):
-#                        if self.words[o].is_object() and self.not_follows_preposition(o):
-#                               found.append((self.words[x].shortlemma,self.words[o].shortlemma))
+                        found.append((self.lemma[x],self.lemma[obj],"q2c"))
         return found
-        #TODO - tu jsem nekde asi prestala
-        #ilter(lambda x: x.shortlemma == "mít" and x.is_verb() and /
 
-    def _find_objects(self,top,bottom,case="4",number="S"):
-        return filter(lambda x: self.words[x].is_noun(case,number) and 
-                               self.not_follows_preposition(x), \
-                      self.sentence_range(top,bottom))
+    def _query3(self):
+        #positive pattern
+        # typ [lemma="dát"&tag="V[^s].*"] positive filter -3, +3 [tag="N..P4.*"]
+        query3 = filter(lambda (x,y): x.is_active() and y.is_plural(), self.verb_object_pairs)
+        return [(pair[0].shortlemma, pair[1].shortlemma, "q3")for pair in query3]
+
+    def _query4(self):
+        #positive pattern
+        #[tag="P4.4S.*"][tag="N..S4.*"] positive filter -3, +3 [lemma="dát"&tag="V[^s].*"]
+        found = []
+        objects = filter(lambda x: x.is_noun("4","S") and self.words[x.position-1].has_tag("P4.4S"), self.words)
+        for obj in objects:
+            for idx in sentence_range(obj.position-4,obj.position+3):
+                if self.words[idx].is_verb() and self.words[idx].is_active():
+                    found.append((obj.shortlemma, self.lemma[idx], "q4"))
+        return found
+
+    def _query5(self):
+        # positive pattern
+        # typ [lemma="dát"&tag="V[^s].*"] positive filter -3, +3 [tag="A..S4.*"] [tag="N..S4.*"]
+        found = []
+        for pair in self.verb_object_pairs:
+            obj_idx = pair[1].position
+            if self.words[obj_idx-1].has_tag("A..S4"):
+                found.append((pair[0].shortlemma,pair[1].shortlemma,"q5"))
+        return found
+
+    def sentence_range(self,bottom,top):
+        bottom = max(0,bottom)
+        top = min(top,len(self.words))
+        return range(bottom,top)
+
+#    def _find_objects(self,top,bottom,case="4",number="S"):
+#        return filter(lambda x: self.words[x].is_noun(case,number) and 
+#                               self.not_follows_preposition(x), \
+#                      self.sentence_range(top,bottom))
 
     def find_objects(self,idx,context_size=CONTEXT_SIZE):
         # Get verb idx and return array with  its objects.
@@ -204,6 +244,9 @@ class Word(object):
             return_value &= self.number() == number
         return return_value
 
+    def is_plural(self):
+        return self.number() == "P"
+ 
     def is_preposition(self):
         return self.tag.startswith("R")
 
@@ -227,16 +270,14 @@ class Word(object):
 if __name__ == "__main__":
 #    Corpus(sys.argv[1])
      i = 0
-     for line in gzip.open("corpora/czeng10","r"):
-         i += 1
-#     for line in gzip.open("corps/extracted.gz","r"):
+#     for line in gzip.open("corpora/czeng10","r"):
+     matches = MM()
+     for line in gzip.open("corps/extracted.gz","r"):
          sentence = Sentence(line)
-
-         rrr =  sentence._query2c()
-         if rrr:
-             print i
-             import pdb; pdb.set_trace()
-#         print "---------"
+         import pdb; pdb.set_trace()
+         matches = sentence.count(matches)
+         sentence.print_matches()
+     import pdb; pdb.set_trace()
 
 
 #for fil in glob.glob("extracted_sentences/%s.*" % verb):

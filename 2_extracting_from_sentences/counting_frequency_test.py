@@ -87,5 +87,20 @@ class Test_Word(unittest.TestCase):
         self.assertTrue(self.prep.is_preposition() and self.prep.case() == "6")
 
 
+class Test_Sentence(unittest.TestCase):
+    def setUp(self):
+        self.q1 = Sentence("Měl|mít|VpYS---XR-AA--- jsem|být|VB-S---1P-AA--- rád|rád|ACYS------A---- psa|pes_^(zvíře)|NNMS4-----A---- a|a-1|J^------------- kočku|kočka|NNFS4-----A---- .|.|Z:-------------")
+        self.q2b = Sentence("Byl|být|VpYS---XR-AA--- dán|dát|VsYS---XX-AP--- rozkaz|rozkaz|NNIS1-----A---- na|na-1|RR--4---------- poplach|poplach|NNIS4-----A---- .|.|Z:-------------")
+        
+    def test_query2a(self):
+        self.assertEqual(self.q2b._query1(),[])
+        self.assertEqual(self.q2b._query2a(),[("dát","rozkaz")])
+        self.assertEqual(self.q2b._query2b(),[])
+        self.assertEqual(self.q2b._query2c(),[])
+        
+
+
+
+
 if __name__ == '__main__':
     unittest.main()
